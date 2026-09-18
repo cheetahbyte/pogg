@@ -84,6 +84,8 @@ Keep both files together. The old `pgplease` configuration, environment variable
 
 ## Help
 
+For coding agents, use the [using-pogg skill](skills/using-pogg/SKILL.md) for provisioning, credential handling, and repair approval rules.
+
 ```sh
 pogg --help
 pogg user add --help
