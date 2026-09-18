@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -356,4 +357,15 @@ func TestPostgresLifecycle(t *testing.T) {
 		t.Fatal("lost stored password")
 	}
 	must("delete", "dock", "--force")
+}
+
+func TestConfirmAcceptsEOFWithoutNewline(t *testing.T) {
+	r := &runner{in: strings.NewReader("myapp"), errOut: io.Discard}
+	if e := r.confirm("myapp"); e != nil {
+		t.Fatal(e)
+	}
+	r = &runner{in: strings.NewReader("other"), errOut: io.Discard}
+	if e := r.confirm("myapp"); e == nil {
+		t.Fatal("expected cancellation")
+	}
 }

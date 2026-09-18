@@ -80,7 +80,7 @@ func (r *runner) confirm(target string) error {
 	}
 	fmt.Fprintf(r.errOut, "Delete %s? This cannot be undone. Type %q: ", target, target)
 	text, e := bufio.NewReader(r.in).ReadString('\n')
-	if e != nil || strings.TrimSpace(text) != target {
+	if (e != nil && !errors.Is(e, io.EOF)) || strings.TrimSpace(text) != target {
 		return errors.New("deletion cancelled; automation must pass --force")
 	}
 	return nil
@@ -97,7 +97,13 @@ func (r *runner) app(target string) (string, string, *App, error) {
 	return a, k, app, nil
 }
 func (r *runner) appInstance(ctx context.Context, a *App) (string, error) {
-	n, e := r.s.resolve(ctx, r.o.instance, r.o.container, a.Instance)
+	var n string
+	var e error
+	if r.o.container != "" {
+		n, e = r.s.byContainer(ctx, r.o.container)
+	} else {
+		n, e = r.s.resolve(ctx, r.o.instance, "", a.Instance)
+	}
 	if e != nil {
 		return "", e
 	}
@@ -364,10 +370,18 @@ func (r *runner) instance(ctx context.Context, action, name string) error {
 	i := Instance{Host: r.o.host, Port: r.o.port, Admin: r.o.admin, SSLMode: r.o.sslmode}
 	pass, hasPass := os.LookupEnv(r.o.passwordEnv)
 	if r.o.container != "" {
+		if r.o.explicitConn {
+			return errors.New("--container discovers host, port, admin, and sslmode; do not combine with those flags")
+		}
 		var e error
 		i, pass, e = inspect(ctx, r.o.container)
 		if e != nil {
 			return e
+		}
+		for n, old := range r.s.state.Instances {
+			if old.Container == i.Container {
+				return fmt.Errorf("container already registered as instance %q", n)
+			}
 		}
 	} else if !hasPass {
 		return fmt.Errorf("set %s to the admin password (an empty value explicitly enables passwordless auth)", r.o.passwordEnv)
@@ -542,32 +556,7 @@ func (r *runner) health(ctx context.Context, cmd string, p []string) error {
 		warnings = append(warnings, rediscoveryWarning)
 	}
 	for _, n := range keys(groups) {
-		c, e := r.s.admin(ctx, n)
-		if e != nil {
-			issues = append(issues, n+": "+e.Error())
-			continue
-		}
-		for _, app := range groups[n] {
-			if cmd == "sync" {
-				if e = r.s.reconcile(ctx, app, c); e != nil {
-					issues = append(issues, app+": "+e.Error())
-					continue
-				}
-			}
-			found, e := r.s.drift(ctx, app, c)
-			if e != nil {
-				issues = append(issues, app+": "+e.Error())
-			} else {
-				issues = append(issues, found...)
-			}
-		}
-		found, e := r.s.unknown(ctx, n, c)
-		if e != nil {
-			issues = append(issues, n+": "+e.Error())
-		} else {
-			warnings = append(warnings, found...)
-		}
-		c.Close(ctx)
+		issues, warnings = r.checkInstance(ctx, cmd, n, groups[n], issues, warnings)
 	}
 	if r.o.json {
 		if e = r.output(map[string]any{"ok": len(issues) == 0, "issues": issues, "warnings": warnings}); e != nil {
@@ -580,6 +569,9 @@ func (r *runner) health(ctx context.Context, cmd string, p []string) error {
 		for _, i := range issues {
 			fmt.Fprintln(r.errOut, "drift:", i)
 		}
+		if len(issues) > 0 {
+			fmt.Fprintln(r.errOut, "pogg:", ReportedError{}.Error())
+		}
 		if len(issues) == 0 && !r.o.quiet {
 			fmt.Fprintln(r.out, "Managed state is healthy.")
 		}
@@ -588,6 +580,39 @@ func (r *runner) health(ctx context.Context, cmd string, p []string) error {
 		return ReportedError{}
 	}
 	return nil
+}
+
+// One deadline per instance and per app: a whole doctor/sync run must not share a single 60s budget.
+func (r *runner) checkInstance(parent context.Context, cmd, n string, apps, issues, warnings []string) ([]string, []string) {
+	ctx, cancel := context.WithTimeout(parent, opTimeout)
+	defer cancel()
+	c, e := r.s.admin(ctx, n)
+	if e != nil {
+		return append(issues, n+": "+e.Error()), warnings
+	}
+	defer c.Close(ctx)
+	for _, app := range apps {
+		actx, acancel := context.WithTimeout(parent, opTimeout)
+		if cmd == "sync" {
+			if e = r.s.reconcile(actx, app, c); e != nil {
+				issues = append(issues, app+": "+e.Error())
+				acancel()
+				continue
+			}
+		}
+		found, e := r.s.drift(actx, app, c)
+		acancel()
+		if e != nil {
+			issues = append(issues, app+": "+e.Error())
+		} else {
+			issues = append(issues, found...)
+		}
+	}
+	found, e := r.s.unknown(ctx, n, c)
+	if e != nil {
+		return append(issues, n+": "+e.Error()), warnings
+	}
+	return issues, append(warnings, found...)
 }
 
 type ReportedError struct{}

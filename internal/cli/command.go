@@ -13,8 +13,10 @@ import (
 type options struct {
 	instance, container, db, access, host, admin, sslmode, passwordEnv, field, format string
 	port                                                                              int
-	json, quiet, force                                                                bool
+	json, quiet, force, explicitConn                                                  bool
 }
+
+const opTimeout = 60 * time.Second
 
 func (o options) validate() error {
 	if o.instance != "" && o.container != "" {
@@ -82,7 +84,10 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 				return err
 			}
 			defer release()
-			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
+			ctx, cancel := context.WithCancel(cmd.Context())
+			if cmd.Annotations["long"] == "" {
+				ctx, cancel = context.WithTimeout(cmd.Context(), opTimeout)
+			}
 			defer cancel()
 			r := &runner{s: s, o: o, in: cmd.InOrStdin(), out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr()}
 			return run(ctx, r, args)
@@ -120,7 +125,8 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		if name == "sync" {
 			short = "Repair managed objects; recreated databases are empty"
 		}
-		add(root, name+" [APP]", short, cobra.MaximumNArgs(1), func(ctx context.Context, r *runner, a []string) error { return r.health(ctx, name, a) })
+		cmd := add(root, name+" [APP]", short, cobra.MaximumNArgs(1), func(ctx context.Context, r *runner, a []string) error { return r.health(ctx, name, a) })
+		cmd.Annotations = map[string]string{"long": "1"}
 	}
 	showHelp := func(cmd *cobra.Command, _ []string) error { return cmd.Help() }
 	for _, kind := range []string{"app", "db", "user"} {
@@ -178,6 +184,11 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 			f.StringVar(&o.admin, "admin", "postgres", "Administrative PostgreSQL login")
 			f.StringVar(&o.sslmode, "sslmode", "prefer", "TLS mode: disable, allow, prefer, require, verify-ca, verify-full")
 			f.StringVar(&o.passwordEnv, "password-env", "PGPASSWORD", "Environment variable containing the admin password")
+			cmd.PreRun = func(cmd *cobra.Command, _ []string) {
+				for _, n := range []string{"host", "port", "admin", "sslmode"} {
+					o.explicitConn = o.explicitConn || cmd.Flags().Changed(n)
+				}
+			}
 		}
 	}
 	return root

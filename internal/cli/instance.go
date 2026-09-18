@@ -83,6 +83,28 @@ func discover(ctx context.Context) ([]string, error) {
 	}
 	return names, nil
 }
+func (s *store) instanceFor(container string) string {
+	for _, n := range keys(s.state.Instances) {
+		if s.state.Instances[n].Container == container {
+			return n
+		}
+	}
+	return ""
+}
+
+// Like resolve with --container, but never registers a new instance.
+func (s *store) byContainer(ctx context.Context, container string) (string, error) {
+	i, _, e := inspect(ctx, container)
+	if e != nil {
+		return "", e
+	}
+	n := s.instanceFor(i.Container)
+	if n == "" {
+		return "", fmt.Errorf("container %q is not a registered instance; register it with instance add NAME --container CONTAINER", container)
+	}
+	return n, nil
+}
+
 func (s *store) resolve(ctx context.Context, explicit, container, appInstance string) (string, error) {
 	if explicit != "" && container != "" {
 		return "", fmt.Errorf("choose --instance or --container, not both")
@@ -92,10 +114,8 @@ func (s *store) resolve(ctx context.Context, explicit, container, appInstance st
 		if e != nil {
 			return "", e
 		}
-		for n, old := range s.state.Instances {
-			if old.Container == i.Container {
-				return n, nil
-			}
+		if n := s.instanceFor(i.Container); n != "" {
+			return n, nil
 		}
 		name := i.Container
 		if e = checkInstanceName(name); e != nil {
