@@ -16,13 +16,13 @@ import (
 )
 
 func TestLocalContract(t *testing.T) {
-	t.Setenv("PGPLEASE_CONFIG_DIR", t.TempDir())
+	t.Setenv("POGG_CONFIG_DIR", t.TempDir())
 	for _, name := range []string{"a_b", "a/b", "a'", "", "UPPER", strings.Repeat("a", 21)} {
 		if checkName(name) == nil {
 			t.Fatalf("accepted %q", name)
 		}
 	}
-	dir := os.Getenv("PGPLEASE_CONFIG_DIR")
+	dir := os.Getenv("POGG_CONFIG_DIR")
 	s, release, e := openStore(dir)
 	if e != nil {
 		t.Fatal(e)
@@ -116,11 +116,11 @@ func TestLocalContract(t *testing.T) {
 
 // Explicitly opt in: creates and destroys only a fresh, uniquely named Docker container.
 func TestPostgresLifecycle(t *testing.T) {
-	if os.Getenv("PGPLEASE_INTEGRATION") != "1" {
-		t.Skip("set PGPLEASE_INTEGRATION=1 to test with disposable Docker PostgreSQL")
+	if os.Getenv("POGG_INTEGRATION") != "1" {
+		t.Skip("set POGG_INTEGRATION=1 to test with disposable Docker PostgreSQL")
 	}
 	ctx := context.Background()
-	container := fmt.Sprintf("pgplease-test-%d", time.Now().UnixNano())
+	container := fmt.Sprintf("pogg-test-%d", time.Now().UnixNano())
 	adminPass := password()
 	b, e := exec.Command("docker", "run", "--detach", "--name", container, "-e", "POSTGRES_PASSWORD="+adminPass, "-p", "127.0.0.1::5432", "postgres:17-alpine").CombinedOutput()
 	if e != nil {
@@ -147,8 +147,8 @@ func TestPostgresLifecycle(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Setenv("PGPLEASE_CONFIG_DIR", t.TempDir())
-	t.Setenv("PGPLEASE_TEST_PASSWORD", adminPass)
+	t.Setenv("POGG_CONFIG_DIR", t.TempDir())
+	t.Setenv("POGG_TEST_PASSWORD", adminPass)
 	run := func(args ...string) (string, error) {
 		t.Helper()
 		var out, errOut bytes.Buffer
@@ -166,7 +166,7 @@ func TestPostgresLifecycle(t *testing.T) {
 		}
 		return out
 	}
-	must("instance", "add", "local", "--host", i.Host, "--port", fmt.Sprint(i.Port), "--admin", i.Admin, "--sslmode", "disable", "--password-env", "PGPLEASE_TEST_PASSWORD", "--json")
+	must("instance", "add", "local", "--host", i.Host, "--port", fmt.Sprint(i.Port), "--admin", i.Admin, "--sslmode", "disable", "--password-env", "POGG_TEST_PASSWORD", "--json")
 	must("create", "shop", "--json")
 	c, e := connect(ctx, i, "postgres", i.Admin, adminPass)
 	if e != nil {
@@ -221,7 +221,7 @@ func TestPostgresLifecycle(t *testing.T) {
 	must("url", "shop/worker", "--db", "events")
 	must("doctor", "--json")
 	// Detect and repair ownership, privilege, schema, membership, and login drift.
-	sql("ALTER ROLE shop_api CREATEDB; REVOKE pgplease_owner_shop_main FROM shop_api; GRANT CONNECT ON DATABASE shop TO PUBLIC")
+	sql("ALTER ROLE shop_api CREATEDB; REVOKE pogg_owner_shop_main FROM shop_api; GRANT CONNECT ON DATABASE shop TO PUBLIC")
 	if _, e = run("doctor", "shop", "--json"); e == nil {
 		t.Fatal("permission drift not detected")
 	}

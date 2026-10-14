@@ -1,9 +1,9 @@
 ---
 name: using-pogg
 description: >
-  Use pogg (formerly pgplease) to provision local PostgreSQL databases and owner
+  Use pogg to provision local PostgreSQL databases and owner
   logins, pass connection credentials to development commands, or diagnose and
-  repair managed database objects. Use when a task involves pogg or pgplease;
+  repair managed database objects. Use when a task involves pogg;
   not for general SQL or production database administration.
 ---
 
@@ -51,7 +51,7 @@ Capture the URL and pass it directly to the authorized consumer. For example, if
 
 The assignment must succeed before running the consumer, so a failed lookup cannot fall through to its default database. Use the project's actual command and confirm it doesn't log credentials. If the lookup reports `using branch copy` on stderr, the consumer runs against the current git branch's copy; confirm that's the intended target, and pass `--no-branch` to use the source database.
 
-Treat URL, password, JSON, and env credential output as secrets. Keep it out of tool output, chat, logs, and committed files. Don't evaluate `pogg get --format env` output as shell code. Persist credentials only with explicit permission, using an ignored file with restricted permissions. Leave pogg's state and secret files under CLI control. Configuration still lives in `~/.config/pgplease` (or `$XDG_CONFIG_HOME/pgplease`), unless `PGPLEASE_CONFIG_DIR` overrides it.
+Treat URL, password, JSON, and env credential output as secrets. Keep it out of tool output, chat, logs, and committed files. Don't evaluate `pogg get --format env` output as shell code. Persist credentials only with explicit permission, using an ignored file with restricted permissions. Leave pogg's state and secret files under CLI control. Configuration lives in `~/.config/pogg` (or `$XDG_CONFIG_HOME/pogg`), unless `POGG_CONFIG_DIR` overrides it.
 
 Finish by checking the consumer's exit status; report the app, database alias, and outcome without the URL or password.
 

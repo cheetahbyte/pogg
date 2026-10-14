@@ -11,7 +11,7 @@ import (
 
 func TestInstanceUpdateRefusesAddressChangeForBoundApps(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("PGPLEASE_CONFIG_DIR", dir)
+	t.Setenv("POGG_CONFIG_DIR", dir)
 	files := map[string]string{
 		"state.json":   `{"version":1,"defaultInstance":"local","instances":{"local":{"host":"127.0.0.1","port":5432,"admin":"postgres","sslmode":"prefer"}},"apps":{"shop":{"instance":"local","databases":{},"users":{}}}}` + "\n",
 		"secrets.json": `{"instance/local/admin":"stored-password"}` + "\n",

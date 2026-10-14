@@ -12,7 +12,7 @@ import (
 
 func ident(s string) string    { return pgx.Identifier{s}.Sanitize() }
 func literal(s string) string  { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-func marker(app string) string { return "pgplease:" + app }
+func marker(app string) string { return "pogg:" + app }
 func object(ctx context.Context, c *pgx.Conn, kind, name string) (bool, string, error) {
 	q := "SELECT COALESCE(shobj_description(oid, 'pg_authid'),'') FROM pg_roles WHERE rolname=$1"
 	if kind == "DATABASE" {

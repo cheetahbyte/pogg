@@ -16,4 +16,4 @@ jobs:
       - run: go build ./cmd/pogg
       - run: go test ./internal/cli -run TestPostgresLifecycle -v -count=1
         env:
-          PGPLEASE_INTEGRATION: '1'
+          POGG_INTEGRATION: '1'

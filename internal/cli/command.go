@@ -60,7 +60,7 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 	var o options
 	root := &cobra.Command{
 		Use: "pogg", Short: "Provision PostgreSQL databases and credentials for local development",
-		Long:         "Provision PostgreSQL databases and credentials for local development.\n\nQuick start (creates an app, database, and owner login):\n  pogg create myapp\n  pogg url myapp\n\nUse app create only for an empty app with manually configured databases and users.\n\nState: $PGPLEASE_CONFIG_DIR or $XDG_CONFIG_HOME/pgplease (default ~/.config/pgplease).\nSync restores missing objects, NOT data. Unknown server objects are never imported or deleted.",
+		Long:         "Provision PostgreSQL databases and credentials for local development.\n\nQuick start (creates an app, database, and owner login):\n  pogg create myapp\n  pogg url myapp\n\nUse app create only for an empty app with manually configured databases and users.\n\nState: $POGG_CONFIG_DIR or $XDG_CONFIG_HOME/pogg (default ~/.config/pogg).\nSync restores missing objects, NOT data. Unknown server objects are never imported or deleted.",
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	root.SetIn(in)

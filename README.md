@@ -105,12 +105,12 @@ pogg delete shop
 
 ## Configuration
 
-Stored in `~/.config/pgplease` (or `$XDG_CONFIG_HOME/pgplease`). Override with `PGPLEASE_CONFIG_DIR`.
+Stored in `~/.config/pogg` (or `$XDG_CONFIG_HOME/pogg`). Override with `POGG_CONFIG_DIR`.
 
 - `state.json`: managed objects and secret references.
 - `secrets.json`: plaintext passwords, protected by mode `0600`.
 
-Keep both files together. The old `pgplease` configuration, environment variable, and internal naming remain compatible; no migration is needed.
+Keep both files together.
 
 ## Help
 
@@ -130,5 +130,5 @@ go vet ./...
 go build ./cmd/pogg
 
 # Integration test: creates and removes a temporary PostgreSQL container.
-PGPLEASE_INTEGRATION=1 go test ./internal/cli -run TestPostgresLifecycle -v
+POGG_INTEGRATION=1 go test ./internal/cli -run TestPostgresLifecycle -v
 ```

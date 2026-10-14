@@ -12,8 +12,8 @@ func TestDockerResolution(t *testing.T) {
 	dir := t.TempDir()
 	script := `#!/bin/sh
 case "$1" in
-  inspect) [ "$4" = gone ] && exit 1; printf '%s' "$PGPLEASE_TEST_INSPECT" ;;
-  ps) if [ "$2" = -a ]; then printf '%s' "$PGPLEASE_TEST_ALL"; else printf '%s' "$PGPLEASE_TEST_RUNNING"; fi ;;
+  inspect) [ "$4" = gone ] && exit 1; printf '%s' "$POGG_TEST_INSPECT" ;;
+  ps) if [ "$2" = -a ]; then printf '%s' "$POGG_TEST_ALL"; else printf '%s' "$POGG_TEST_RUNNING"; fi ;;
   *) exit 1 ;;
 esac
 `
@@ -21,9 +21,9 @@ esac
 		t.Fatal(e)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("PGPLEASE_TEST_INSPECT", `[{"Name":"/found","State":{"Running":true},"Config":{"Env":["POSTGRES_USER=admin","POSTGRES_PASSWORD=secret"]},"NetworkSettings":{"Ports":{"5432/tcp":[{"HostIp":"0.0.0.0","HostPort":"54321"}]}}}]`)
-	t.Setenv("PGPLEASE_TEST_RUNNING", "found")
-	t.Setenv("PGPLEASE_TEST_ALL", "found")
+	t.Setenv("POGG_TEST_INSPECT", `[{"Name":"/found","State":{"Running":true},"Config":{"Env":["POSTGRES_USER=admin","POSTGRES_PASSWORD=secret"]},"NetworkSettings":{"Ports":{"5432/tcp":[{"HostIp":"0.0.0.0","HostPort":"54321"}]}}}]`)
+	t.Setenv("POGG_TEST_RUNNING", "found")
+	t.Setenv("POGG_TEST_ALL", "found")
 	s, release, e := openStore(t.TempDir())
 	if e != nil {
 		t.Fatal(e)
@@ -42,7 +42,7 @@ esac
 	if e != nil || p != "secret" {
 		t.Fatal(p, e)
 	}
-	t.Setenv("PGPLEASE_TEST_RUNNING", "one\ntwo")
+	t.Setenv("POGG_TEST_RUNNING", "one\ntwo")
 	if n, e = s.resolve(ctx, "", "", ""); e != nil || n != "found" {
 		t.Fatal("saved default not honored", n, e)
 	}
@@ -53,7 +53,7 @@ esac
 	s.state.Instances["old"] = Instance{Host: "localhost", Port: 5432, Admin: "postgres", SSLMode: "disable", Container: "gone"}
 	s.state.Default = "old"
 	s.state.Apps["shop"] = &App{Instance: "old", Databases: map[string]Database{}, Users: map[string]User{}}
-	t.Setenv("PGPLEASE_TEST_RUNNING", "found")
+	t.Setenv("POGG_TEST_RUNNING", "found")
 	warning, e := s.rediscoverDefault(ctx)
 	if e != nil || warning == "" || s.state.Default != "found" || s.state.Apps["shop"].Instance != "old" {
 		t.Fatal("unsafe rediscovery", warning, e)

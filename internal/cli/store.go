@@ -87,7 +87,7 @@ func openStore(dir string) (*store, func(), error) {
 	lock := filepath.Join(dir, "lock")
 	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		return nil, nil, fmt.Errorf("state locked (after a crash, remove %s only when no pogg or older pgplease process is running): %w", lock, err)
+		return nil, nil, fmt.Errorf("state locked (after a crash, remove %s only when no pogg process is running): %w", lock, err)
 	}
 	fmt.Fprintln(f, os.Getpid())
 	f.Close()
@@ -141,7 +141,7 @@ func atomicJSON(path string, v any) error {
 	if e != nil {
 		return e
 	}
-	f, e := os.CreateTemp(filepath.Dir(path), ".pgplease-*")
+	f, e := os.CreateTemp(filepath.Dir(path), ".pogg-*")
 	if e != nil {
 		return e
 	}

@@ -43,7 +43,7 @@ func TestCommandParsing(t *testing.T) {
 
 func TestHelpValidationAndCompletionDoNotOpenState(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "uncreated")
-	t.Setenv("PGPLEASE_CONFIG_DIR", dir)
+	t.Setenv("POGG_CONFIG_DIR", dir)
 	for _, tc := range []struct {
 		args []string
 		want string

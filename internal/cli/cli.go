@@ -39,14 +39,14 @@ func splitTarget(t string) (string, string, error) {
 	return p[0], p[1], nil
 }
 func configDir() (string, error) {
-	if d := os.Getenv("PGPLEASE_CONFIG_DIR"); d != "" {
+	if d := os.Getenv("POGG_CONFIG_DIR"); d != "" {
 		return d, nil
 	}
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
-		return filepath.Join(d, "pgplease"), nil
+		return filepath.Join(d, "pogg"), nil
 	}
 	h, e := os.UserHomeDir()
-	return filepath.Join(h, ".config", "pgplease"), e
+	return filepath.Join(h, ".config", "pogg"), e
 }
 
 type runner struct {
@@ -271,7 +271,7 @@ func makeDatabase(app, key string) Database {
 	if key == "main" {
 		name = app
 	}
-	return Database{Name: name, Owner: "pgplease_owner_" + app + "_" + key}
+	return Database{Name: name, Owner: "pogg_owner_" + app + "_" + key}
 }
 func chooseDBs(app string, a *App, value string) ([]string, error) {
 	if len(a.Databases) == 0 {
