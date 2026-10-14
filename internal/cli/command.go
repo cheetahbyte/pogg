@@ -11,10 +11,10 @@ import (
 )
 
 type options struct {
-	changed                                                                           map[string]bool
-	instance, container, db, access, host, admin, sslmode, passwordEnv, field, format string
-	port                                                                              int
-	json, quiet, force, explicitConn                                                  bool
+	changed                                                                                   map[string]bool
+	instance, container, db, access, host, admin, sslmode, passwordEnv, field, format, branch string
+	port                                                                                      int
+	json, quiet, force, explicitConn, noBranch                                                bool
 }
 
 const opTimeout = 60 * time.Second
@@ -40,6 +40,9 @@ func (o options) validate() error {
 	}
 	if o.field != "" && o.format != "" {
 		return errors.New("choose --field or --format")
+	}
+	if o.branch != "" && o.noBranch {
+		return errors.New("choose --branch or --no-branch")
 	}
 	if o.json && o.format == "env" {
 		return errors.New("--json conflicts with --format env")
@@ -116,6 +119,8 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 		}
 		cmd := add(root, name+" APP[/USER]", short, cobra.ExactArgs(1), func(ctx context.Context, r *runner, a []string) error { return r.credentials(ctx, name, a[0]) })
 		cmd.Flags().StringVar(&o.db, "db", "", "Select a database alias")
+		cmd.Flags().StringVar(&o.branch, "branch", "", "Use the copy for this git branch (default: current branch, if a copy exists)")
+		cmd.Flags().BoolVar(&o.noBranch, "no-branch", false, "Use the source database even when a branch copy exists")
 		if name == "get" {
 			cmd.Flags().StringVar(&o.field, "field", "", "Print one credential field: url or password")
 			cmd.Flags().StringVar(&o.format, "format", "", "Credential format: json or env (default json)")
@@ -165,6 +170,29 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 				cmd.Flags().StringVar(&o.db, "db", "", "Database aliases, separated by commas")
 				cmd.Flags().StringVar(&o.access, "access", "owner", "Access preset (only owner is supported)")
 			}
+		}
+	}
+	branch := &cobra.Command{Use: "branch", Short: "Copy databases for git branches", Args: cobra.NoArgs, RunE: showHelp}
+	root.AddCommand(branch)
+	for _, action := range []string{"create", "delete", "list", "prune"} {
+		use, short, args := action+" APP[/DATABASE]", "Copy all app databases, or one, for the current git branch", cobra.ExactArgs(1)
+		switch action {
+		case "delete":
+			short = "Delete branch copies for the current git branch"
+		case "list":
+			use, short, args = "list [APP]", "List branch copies", cobra.MaximumNArgs(1)
+		case "prune":
+			use, short, args = "prune [APP]", "Delete copies whose local git branch no longer exists", cobra.MaximumNArgs(1)
+		}
+		cmd := add(branch, use, short, args, func(ctx context.Context, r *runner, a []string) error { return r.branch(ctx, action, a) })
+		if action == "create" || action == "delete" {
+			cmd.Flags().StringVar(&o.branch, "branch", "", "Git branch name (default: current branch)")
+		}
+		if action == "delete" || action == "prune" {
+			cmd.Flags().BoolVar(&o.force, "force", false, "Skip deletion confirmation; active connections still prevent deletion")
+		}
+		if action == "create" {
+			cmd.Annotations = map[string]string{"long": "1"}
 		}
 	}
 	instance := &cobra.Command{Use: "instance", Short: "Register servers and choose the default instance", Args: cobra.NoArgs, RunE: showHelp}

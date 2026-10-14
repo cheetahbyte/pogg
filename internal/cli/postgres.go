@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func ident(s string) string    { return pgx.Identifier{s}.Sanitize() }
@@ -25,6 +27,9 @@ func object(ctx context.Context, c *pgx.Conn, kind, name string) (bool, string, 
 }
 func execSQL(ctx context.Context, c *pgx.Conn, sql string) error {
 	_, e := c.Exec(ctx, sql)
+	return sqlError(e)
+}
+func sqlError(e error) error {
 	if e != nil {
 		if pe, ok := e.(interface{ SQLState() string }); ok {
 			return fmt.Errorf("PostgreSQL operation failed (SQLSTATE %s)", pe.SQLState())
@@ -110,38 +115,14 @@ func (s *store) reconcile(ctx context.Context, appName string, c *pgx.Conn) erro
 		if e := ensureRole(ctx, c, d.Owner, appName, "", false); e != nil {
 			return e
 		}
-		exists, e := managed(ctx, c, "DATABASE", d.Name, appName)
-		if e != nil {
+		if e := s.ensureDatabase(ctx, c, appName, a.Instance, d.Name, d.Owner, ""); e != nil {
 			return e
 		}
-		if !exists {
-			if e = execSQL(ctx, c, "CREATE DATABASE "+ident(d.Name)+" OWNER "+ident(d.Owner)); e != nil {
+		// Missing branch copies are cloned again from the current source contents.
+		for _, b := range keys(d.Branches) {
+			if e := s.ensureDatabase(ctx, c, appName, a.Instance, d.Branches[b].Name, d.Owner, d.Name); e != nil {
 				return e
 			}
-			if e = execSQL(ctx, c, "COMMENT ON DATABASE "+ident(d.Name)+" IS "+literal(marker(appName))); e != nil {
-				return fmt.Errorf("database created but marking failed; inspect manually: %w", e)
-			}
-		}
-		if e = execSQL(ctx, c, "ALTER DATABASE "+ident(d.Name)+" OWNER TO "+ident(d.Owner)); e != nil {
-			return e
-		}
-		if e = execSQL(ctx, c, "REVOKE ALL ON DATABASE "+ident(d.Name)+" FROM PUBLIC"); e != nil {
-			return e
-		}
-		dc, e := s.dbConn(ctx, a.Instance, d.Name)
-		if e != nil {
-			return e
-		}
-		e = execSQL(ctx, dc, "CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION "+ident(d.Owner))
-		if e == nil {
-			e = execSQL(ctx, dc, "ALTER SCHEMA public OWNER TO "+ident(d.Owner))
-		}
-		if e == nil {
-			e = execSQL(ctx, dc, "REVOKE CREATE ON SCHEMA public FROM PUBLIC")
-		}
-		dc.Close(ctx)
-		if e != nil {
-			return e
 		}
 	}
 	for _, key := range keys(a.Users) {
@@ -162,12 +143,65 @@ func (s *store) reconcile(ctx context.Context, appName string, c *pgx.Conn) erro
 				return e
 			}
 			// All migration-created objects share the database owner, even across logins.
-			if e = execSQL(ctx, c, "ALTER ROLE "+ident(u.Name)+" IN DATABASE "+ident(d.Name)+" SET role TO "+literal(d.Owner)); e != nil {
-				return e
+			for _, n := range databaseNames(d) {
+				if e = execSQL(ctx, c, "ALTER ROLE "+ident(u.Name)+" IN DATABASE "+ident(n)+" SET role TO "+literal(d.Owner)); e != nil {
+					return e
+				}
 			}
 		}
 	}
 	return nil
+}
+func databaseNames(d Database) []string {
+	names := []string{d.Name}
+	for _, b := range keys(d.Branches) {
+		names = append(names, d.Branches[b].Name)
+	}
+	return names
+}
+
+// ensureDatabase creates a missing database, as a copy of template when set, and enforces ownership and privileges.
+func (s *store) ensureDatabase(ctx context.Context, c *pgx.Conn, appName, instance, name, owner, template string) error {
+	exists, e := managed(ctx, c, "DATABASE", name, appName)
+	if e != nil {
+		return e
+	}
+	if !exists {
+		sql := "CREATE DATABASE " + ident(name) + " OWNER " + ident(owner)
+		if template != "" {
+			sql += " TEMPLATE " + ident(template)
+			var pe *pgconn.PgError
+			if _, e = c.Exec(ctx, sql); errors.As(e, &pe) && pe.Code == "55006" {
+				return fmt.Errorf("cannot copy database %q while other sessions are connected to it; stop clients such as dev servers and retry", template)
+			} else if e != nil {
+				return fmt.Errorf("cannot copy database %q: %w", template, sqlError(e))
+			}
+		} else if e = execSQL(ctx, c, sql); e != nil {
+			return e
+		}
+		if e = execSQL(ctx, c, "COMMENT ON DATABASE "+ident(name)+" IS "+literal(marker(appName))); e != nil {
+			return fmt.Errorf("database created but marking failed; inspect manually: %w", e)
+		}
+	}
+	if e = execSQL(ctx, c, "ALTER DATABASE "+ident(name)+" OWNER TO "+ident(owner)); e != nil {
+		return e
+	}
+	if e = execSQL(ctx, c, "REVOKE ALL ON DATABASE "+ident(name)+" FROM PUBLIC"); e != nil {
+		return e
+	}
+	dc, e := s.dbConn(ctx, instance, name)
+	if e != nil {
+		return e
+	}
+	defer dc.Close(ctx)
+	e = execSQL(ctx, dc, "CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION "+ident(owner))
+	if e == nil {
+		e = execSQL(ctx, dc, "ALTER SCHEMA public OWNER TO "+ident(owner))
+	}
+	if e == nil {
+		e = execSQL(ctx, dc, "REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+	}
+	return e
 }
 func (s *store) drift(ctx context.Context, name string, c *pgx.Conn) ([]string, error) {
 	a := s.state.Apps[name]
@@ -202,10 +236,38 @@ func (s *store) drift(ctx context.Context, name string, c *pgx.Conn) ([]string, 
 		}
 		return exists, nil
 	}
+	checkDatabaseAccess := func(name, want string) error {
+		var owner string
+		if e := c.QueryRow(ctx, "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1", name).Scan(&owner); e != nil {
+			return e
+		}
+		if owner != want {
+			issues = append(issues, "wrong owner for database "+name)
+		}
+		var publicAccess bool
+		if e := c.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_database, LATERAL aclexplode(COALESCE(datacl,acldefault('d',datdba))) acl WHERE datname=$1 AND acl.grantee=0)", name).Scan(&publicAccess); e != nil {
+			return e
+		}
+		if publicAccess {
+			issues = append(issues, "public database privileges on "+name)
+		}
+		return nil
+	}
 	for _, k := range keys(a.Databases) {
 		d := a.Databases[k]
 		if _, e := check("ROLE", d.Owner); e != nil {
 			return nil, e
+		}
+		for _, n := range databaseNames(d)[1:] {
+			exists, e := check("DATABASE", n)
+			if e != nil {
+				return nil, e
+			}
+			if exists {
+				if e = checkDatabaseAccess(n, d.Owner); e != nil {
+					return nil, e
+				}
+			}
 		}
 		exists, e := check("DATABASE", d.Name)
 		if e != nil {
@@ -214,20 +276,10 @@ func (s *store) drift(ctx context.Context, name string, c *pgx.Conn) ([]string, 
 		if !exists {
 			continue
 		}
+		if e = checkDatabaseAccess(d.Name, d.Owner); e != nil {
+			return nil, e
+		}
 		var owner string
-		if e = c.QueryRow(ctx, "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname=$1", d.Name).Scan(&owner); e != nil {
-			return nil, e
-		}
-		if owner != d.Owner {
-			issues = append(issues, "wrong owner for database "+d.Name)
-		}
-		var publicAccess bool
-		if e = c.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_database, LATERAL aclexplode(COALESCE(datacl,acldefault('d',datdba))) acl WHERE datname=$1 AND acl.grantee=0)", d.Name).Scan(&publicAccess); e != nil {
-			return nil, e
-		}
-		if publicAccess {
-			issues = append(issues, "public database privileges on "+d.Name)
-		}
 		dc, e := s.dbConn(ctx, a.Instance, d.Name)
 		if e != nil {
 			issues = append(issues, e.Error())
@@ -294,7 +346,9 @@ func (s *store) unknown(ctx context.Context, instance string, c *pgx.Conn) ([]st
 			continue
 		}
 		for _, d := range a.Databases {
-			dbs[d.Name] = true
+			for _, n := range databaseNames(d) {
+				dbs[n] = true
+			}
 			roles[d.Owner] = true
 		}
 		for _, u := range a.Users {
@@ -339,44 +393,53 @@ func (s *store) dropUser(ctx context.Context, c *pgx.Conn, appName, key string) 
 		return e
 	}
 	for _, d := range a.Databases {
-		exists, e := managed(ctx, c, "DATABASE", d.Name, appName)
-		if e != nil {
-			return e
-		}
-		if !exists {
-			continue
-		}
-		dc, e := s.dbConn(ctx, a.Instance, d.Name)
-		if e != nil {
-			return e
-		}
-		e = execSQL(ctx, dc, "REASSIGN OWNED BY "+ident(u.Name)+" TO "+ident(d.Owner))
-		if e == nil {
-			e = execSQL(ctx, dc, "DROP OWNED BY "+ident(u.Name))
-		}
-		dc.Close(ctx)
-		if e != nil {
-			return e
+		for _, n := range databaseNames(d) {
+			exists, e := managed(ctx, c, "DATABASE", n, appName)
+			if e != nil {
+				return e
+			}
+			if !exists {
+				continue
+			}
+			dc, e := s.dbConn(ctx, a.Instance, n)
+			if e != nil {
+				return e
+			}
+			e = execSQL(ctx, dc, "REASSIGN OWNED BY "+ident(u.Name)+" TO "+ident(d.Owner))
+			if e == nil {
+				e = execSQL(ctx, dc, "DROP OWNED BY "+ident(u.Name))
+			}
+			dc.Close(ctx)
+			if e != nil {
+				return e
+			}
 		}
 	}
 	return execSQL(ctx, c, "DROP ROLE "+ident(u.Name))
 }
 func dropDatabase(ctx context.Context, c *pgx.Conn, appName string, d Database) error {
-	exists, e := managed(ctx, c, "DATABASE", d.Name, appName)
-	if e != nil {
-		return e
-	}
-	if exists {
-		if e = execSQL(ctx, c, "DROP DATABASE "+ident(d.Name)); e != nil {
-			return fmt.Errorf("cannot drop database (close active connections first): %w", e)
+	// Branch copies first: the owner role cannot be dropped while it owns them.
+	for _, n := range append(databaseNames(d)[1:], d.Name) {
+		if e := dropManagedDatabase(ctx, c, appName, n); e != nil {
+			return e
 		}
 	}
-	exists, e = managed(ctx, c, "ROLE", d.Owner, appName)
+	exists, e := managed(ctx, c, "ROLE", d.Owner, appName)
 	if e != nil {
 		return e
 	}
 	if exists {
 		return execSQL(ctx, c, "DROP ROLE "+ident(d.Owner))
+	}
+	return nil
+}
+func dropManagedDatabase(ctx context.Context, c *pgx.Conn, appName, name string) error {
+	exists, e := managed(ctx, c, "DATABASE", name, appName)
+	if e != nil || !exists {
+		return e
+	}
+	if e = execSQL(ctx, c, "DROP DATABASE "+ident(name)); e != nil {
+		return fmt.Errorf("cannot drop database (close active connections first): %w", e)
 	}
 	return nil
 }

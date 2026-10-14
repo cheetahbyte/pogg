@@ -20,9 +20,16 @@ type Instance struct {
 	SSLMode   string `json:"sslmode"`
 }
 type Database struct {
-	Name     string `json:"database"`
-	Owner    string `json:"owner"`
-	Deleting bool   `json:"deleting,omitempty"`
+	Name     string            `json:"database"`
+	Owner    string            `json:"owner"`
+	Deleting bool              `json:"deleting,omitempty"`
+	Branches map[string]Branch `json:"branches,omitempty"`
+}
+
+// Branch is a template copy of a database for one git branch; it shares the source owner role.
+type Branch struct {
+	Name string `json:"database"`
+	Repo string `json:"repo,omitempty"`
 }
 type User struct {
 	Name      string   `json:"username"`
@@ -174,6 +181,11 @@ func (s *State) validate() error {
 			want := makeDatabase(name, key)
 			if checkName(key) != nil || d.Name != want.Name || d.Owner != want.Owner {
 				return fmt.Errorf("invalid database %s/%s in state", name, key)
+			}
+			for b, br := range d.Branches {
+				if checkBranchName(b) != nil || br.Name != branchDatabase(d.Name, b) {
+					return fmt.Errorf("invalid branch %q of %s/%s in state", b, name, key)
+				}
 			}
 		}
 		for key, u := range a.Users {

@@ -49,15 +49,19 @@ Capture the URL and pass it directly to the authorized consumer. For example, if
 )
 ```
 
-The assignment must succeed before running the consumer, so a failed lookup cannot fall through to its default database. Use the project's actual command and confirm it doesn't log credentials.
+The assignment must succeed before running the consumer, so a failed lookup cannot fall through to its default database. Use the project's actual command and confirm it doesn't log credentials. If the lookup reports `using branch copy` on stderr, the consumer runs against the current git branch's copy; confirm that's the intended target, and pass `--no-branch` to use the source database.
 
 Treat URL, password, JSON, and env credential output as secrets. Keep it out of tool output, chat, logs, and committed files. Don't evaluate `pogg get --format env` output as shell code. Persist credentials only with explicit permission, using an ignored file with restricted permissions. Leave pogg's state and secret files under CLI control. Configuration still lives in `~/.config/pgplease` (or `$XDG_CONFIG_HOME/pgplease`), unless `PGPLEASE_CONFIG_DIR` overrides it.
 
 Finish by checking the consumer's exit status; report the app, database alias, and outcome without the URL or password.
 
+## Branch databases
+
+`pogg branch create APP` copies the app's databases for the current git branch, and `url`/`get` then select the copy automatically inside that repository. When a command reports `using branch copy` on stderr, the consumer is talking to the copy, not the source database. Pass `--no-branch` or `--branch NAME` to choose explicitly. Copying fails while other sessions are connected to the source; report this instead of stopping the user's processes. `branch delete` and `branch prune` drop data and follow the same approval rules as deletion below.
+
 ## Diagnose before repairing or deleting
 
 1. Run `pogg doctor APP --on INSTANCE --json` to inspect drift on the confirmed instance before proposing repairs. For a requested global check, `pogg doctor --json` contacts every registered instance; it isn't necessarily cheap. Without an explicit instance or container selector, doctor can rediscover the default container and update configuration, even with `APP` supplied.
-2. Explain the affected objects and obtain explicit approval before `sync`, password resets, or deletion. `sync` can recreate empty databases; it does not recover data. Password resets invalidate existing credentials. App deletion removes every managed database and user in that app.
+2. Explain the affected objects and obtain explicit approval before `sync`, password resets, or deletion. `sync` can recreate empty databases and re-copy missing branch copies from the source's current contents; it does not recover data. Password resets invalidate existing credentials. App deletion removes every managed database and user in that app.
 3. Apply only the approved operation. Use `--force` only when the user explicitly approved skipping confirmation; it does not terminate active connections. If connections block deletion, report the blocker instead of killing sessions. Delete referencing users before an individual database.
 4. Verify repairs with `pogg doctor APP --on INSTANCE --json`; verify deletions with `pogg list --json` or the surviving app's metadata. Report remaining drift or blockers rather than claiming recovery.

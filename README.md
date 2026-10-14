@@ -63,6 +63,28 @@ pogg get shop/api --format env
 
 `url` prints only the URL; diagnostics go to stderr. Omit the user only for single-user apps. Use `--db` for users with multiple databases. Treat credential output as secrets.
 
+## Branch databases
+
+Give a git branch its own copy of the app's databases, for example while reviewing a pull request with migrations:
+
+```sh
+git switch feature/login
+pogg branch create shop        # copies every database; use shop/events for one
+pogg url shop                  # uses the copy while feature/login is checked out
+pogg url shop --no-branch      # uses the source database
+pogg url shop --branch feature/login
+
+pogg branch list
+pogg branch delete shop        # deletes the copies for the current branch
+pogg branch prune              # deletes copies whose local branch no longer exists
+```
+
+- `url` and `get` use a copy only when one exists for the current branch of the same repository; they report it on stderr, even with `--quiet`.
+- Copies share the source database's owner role, so every user with access to the source can use them.
+- Copying requires that no other sessions are connected to the source database. Stop dev servers or other clients first.
+- `sync` copies a missing branch database again from the source's current contents.
+- Deleting a database or app also deletes its branch copies.
+
 ## Inspect, repair, and delete
 
 ```sh

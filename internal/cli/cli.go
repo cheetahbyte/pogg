@@ -527,12 +527,22 @@ func (r *runner) credentials(ctx context.Context, cmd, target string) error {
 			}
 		}
 	}
+	dbName, branch, e := r.branchDatabaseFor(ctx, d)
+	if e != nil {
+		return e
+	}
+	if branch != "" {
+		fmt.Fprintf(r.errOut, "pogg: using branch copy %s for %q\n", dbName, branch)
+	}
 	p, e := r.s.secrets.Get(u.SecretRef)
 	if e != nil {
 		return e
 	}
-	v := connectionURL(i, d.Name, u.Name, p)
-	fields := map[string]any{"url": v, "password": p, "host": i.Host, "port": i.Port, "database": d.Name, "username": u.Name, "instance": a.Instance, "access": "owner"}
+	v := connectionURL(i, dbName, u.Name, p)
+	fields := map[string]any{"url": v, "password": p, "host": i.Host, "port": i.Port, "database": dbName, "username": u.Name, "instance": a.Instance, "access": "owner"}
+	if branch != "" {
+		fields["branch"] = branch
+	}
 	if r.o.json || r.o.format == "json" {
 		if r.o.field != "" {
 			return r.output(map[string]any{r.o.field: fields[r.o.field]})
@@ -547,7 +557,7 @@ func (r *runner) credentials(ctx context.Context, cmd, target string) error {
 		return e
 	}
 	if r.o.format == "env" {
-		for _, kv := range [][2]string{{"DATABASE_URL", v}, {"PGHOST", i.Host}, {"PGPORT", strconv.Itoa(i.Port)}, {"PGDATABASE", d.Name}, {"PGUSER", u.Name}, {"PGPASSWORD", p}, {"PGSSLMODE", i.SSLMode}} {
+		for _, kv := range [][2]string{{"DATABASE_URL", v}, {"PGHOST", i.Host}, {"PGPORT", strconv.Itoa(i.Port)}, {"PGDATABASE", dbName}, {"PGUSER", u.Name}, {"PGPASSWORD", p}, {"PGSSLMODE", i.SSLMode}} {
 			if _, e = fmt.Fprintf(r.out, "%s=%s\n", kv[0], shellQuote(kv[1])); e != nil {
 				return e
 			}
