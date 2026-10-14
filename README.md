@@ -31,6 +31,14 @@ pogg create shop
 
 Use `--on NAME` to select an instance. For remote servers with trusted certificates, add `--sslmode verify-full` when registering. `pogg` never creates, starts, or stops containers.
 
+To disable TLS for an existing local instance:
+
+```sh
+pogg instance update local --sslmode disable
+```
+
+`update` changes only supplied settings and verifies the connection before saving. All apps on that instance inherit its SSL mode in their connection URLs. Supported flags are `--host`, `--port`, `--admin`, `--sslmode`, and `--password-env`. The saved admin password is reused unless you explicitly supply `--password-env`. This flag reads an existing server password; it doesn't reset the PostgreSQL password. Docker-backed instances allow only SSL mode and password updates; container discovery manages their connection address and admin login. Changing `--host` or `--port` on an instance that apps use requires `--force`, because it doesn't move their databases or users; use it only when the new address reaches the same server.
+
 ## Manage databases and users
 
 `create shop` creates the app, its `main` database, and a `shop` user. Add more:

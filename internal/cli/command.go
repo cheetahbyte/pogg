@@ -11,6 +11,7 @@ import (
 )
 
 type options struct {
+	changed                                                                           map[string]bool
 	instance, container, db, access, host, admin, sslmode, passwordEnv, field, format string
 	port                                                                              int
 	json, quiet, force, explicitConn                                                  bool
@@ -171,23 +172,41 @@ func newCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
 	add(instance, "list", "List registered instances without credentials", cobra.NoArgs, func(_ context.Context, r *runner, _ []string) error {
 		return r.output(map[string]any{"default": r.s.state.Default, "instances": r.s.state.Instances})
 	})
-	for _, action := range []string{"add", "default"} {
+	for _, action := range []string{"add", "update", "default"} {
 		short := "Register a named PostgreSQL instance"
 		if action == "default" {
 			short = "Set the default PostgreSQL instance"
+		} else if action == "update" {
+			short = "Update explicitly supplied instance settings after verifying connectivity"
 		}
 		cmd := add(instance, action+" NAME", short, cobra.ExactArgs(1), func(ctx context.Context, r *runner, a []string) error { return r.instance(ctx, action, a[0]) })
-		if action == "add" {
+		if action == "add" || action == "update" {
 			f := cmd.Flags()
 			f.StringVar(&o.host, "host", "localhost", "PostgreSQL host")
 			f.IntVar(&o.port, "port", 5432, "PostgreSQL port")
 			f.StringVar(&o.admin, "admin", "postgres", "Administrative PostgreSQL login")
 			f.StringVar(&o.sslmode, "sslmode", "prefer", "TLS mode: disable, allow, prefer, require, verify-ca, verify-full")
 			f.StringVar(&o.passwordEnv, "password-env", "PGPASSWORD", "Environment variable containing the admin password")
-			cmd.PreRun = func(cmd *cobra.Command, _ []string) {
-				for _, n := range []string{"host", "port", "admin", "sslmode"} {
-					o.explicitConn = o.explicitConn || cmd.Flags().Changed(n)
+			if action == "update" {
+				f.BoolVar(&o.force, "force", false, "Change host or port even when apps use the instance")
+			}
+			cmd.PreRunE = func(cmd *cobra.Command, _ []string) error {
+				o.changed = map[string]bool{}
+				for _, n := range []string{"host", "port", "admin", "sslmode", "password-env"} {
+					o.changed[n] = cmd.Flags().Changed(n)
+					if n != "password-env" {
+						o.explicitConn = o.explicitConn || o.changed[n]
+					}
 				}
+				if action == "update" {
+					if cmd.Flags().Changed("container") || cmd.Flags().Changed("on") || cmd.Flags().Changed("instance") {
+						return errors.New("instance update selects its target by NAME; do not use --container, --on, or --instance")
+					}
+					if !o.explicitConn && !o.changed["password-env"] {
+						return errors.New("instance update requires at least one setting flag")
+					}
+				}
+				return nil
 			}
 		}
 	}

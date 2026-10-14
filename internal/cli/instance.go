@@ -182,45 +182,44 @@ func (s *store) admin(ctx context.Context, name string) (*pgx.Conn, error) {
 	if e != nil {
 		return nil, e
 	}
+	fresh, pass, c, err := connectInstance(ctx, i, p)
+	if fresh == i && pass == p {
+		return c, err
+	}
+	if e = s.putInstance(name, fresh, pass); e != nil {
+		if c != nil {
+			c.Close(ctx)
+		}
+		return nil, e
+	}
+	return c, err
+}
+
+// connectInstance refreshes a container's address and returns the instance and password that connected.
+// The returned instance carries the refreshed address even when connecting fails.
+func connectInstance(ctx context.Context, i Instance, pass string) (Instance, string, *pgx.Conn, error) {
 	if i.Container != "" {
 		fresh, _, e := inspect(ctx, i.Container)
 		if e != nil {
-			return nil, e
+			return i, pass, nil, e
 		}
 		// Keep registered credentials: container environment may no longer match ALTER ROLE.
-		if i.Host != fresh.Host || i.Port != fresh.Port {
-			i.Host = fresh.Host
-			i.Port = fresh.Port
-			s.state.Instances[name] = i
-			if e = s.save(); e != nil {
-				return nil, e
-			}
-		}
+		i.Host, i.Port = fresh.Host, fresh.Port
 	}
-	c, err := connect(ctx, i, "postgres", i.Admin, p)
+	c, err := connect(ctx, i, "postgres", i.Admin, pass)
 	if err == nil || i.Container == "" {
-		return c, err
+		return i, pass, c, err
 	}
 	// A recreated container may have new bootstrap credentials. Never change the server's password.
 	fresh, detected, inspectErr := inspect(ctx, i.Container)
-	if inspectErr != nil || (detected == p && fresh.Admin == i.Admin) {
-		return nil, err
+	if inspectErr != nil || (detected == pass && fresh.Admin == i.Admin) {
+		return i, pass, nil, err
 	}
 	fresh.SSLMode = i.SSLMode
-	c, err = connect(ctx, fresh, "postgres", fresh.Admin, detected)
-	if err != nil {
-		return nil, err
+	if c, err = connect(ctx, fresh, "postgres", fresh.Admin, detected); err != nil {
+		return i, pass, nil, err
 	}
-	if err = s.secrets.Set(adminKey(name), detected); err != nil {
-		c.Close(ctx)
-		return nil, err
-	}
-	s.state.Instances[name] = fresh
-	if err = s.save(); err != nil {
-		c.Close(ctx)
-		return nil, err
-	}
-	return c, nil
+	return fresh, detected, c, nil
 }
 
 // Rediscovery changes only the default, never an existing app's instance binding.

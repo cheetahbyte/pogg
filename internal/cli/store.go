@@ -221,3 +221,23 @@ func checkInstanceName(s string) error {
 	return nil
 }
 func adminKey(name string) string { return "instance/" + name + "/admin" }
+
+// putInstance saves an instance with its admin password and restores the previous password if the state write fails.
+func (s *store) putInstance(name string, i Instance, pass string) error {
+	key := adminKey(name)
+	old, missing := s.secrets.Get(key)
+	if missing != nil || old != pass {
+		if err := s.secrets.Set(key, pass); err != nil {
+			return err
+		}
+	}
+	s.state.Instances[name] = i
+	err := s.save()
+	if err == nil || (missing == nil && old == pass) {
+		return err
+	}
+	if missing != nil {
+		return errors.Join(err, s.secrets.Delete(key))
+	}
+	return errors.Join(err, s.secrets.Set(key, old))
+}

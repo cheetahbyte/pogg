@@ -364,16 +364,19 @@ func (r *runner) instance(ctx context.Context, action, name string) error {
 		}
 		return r.done("Default instance: " + name)
 	}
+	if action == "update" {
+		return r.updateInstance(ctx, name)
+	}
 	if _, ok := r.s.state.Instances[name]; ok {
 		return errors.New("instance already exists")
 	}
 	i := Instance{Host: r.o.host, Port: r.o.port, Admin: r.o.admin, SSLMode: r.o.sslmode}
-	pass, hasPass := os.LookupEnv(r.o.passwordEnv)
+	var pass string
+	var e error
 	if r.o.container != "" {
 		if r.o.explicitConn {
 			return errors.New("--container discovers host, port, admin, and sslmode; do not combine with those flags")
 		}
-		var e error
 		i, pass, e = inspect(ctx, r.o.container)
 		if e != nil {
 			return e
@@ -383,8 +386,8 @@ func (r *runner) instance(ctx context.Context, action, name string) error {
 				return fmt.Errorf("container already registered as instance %q", n)
 			}
 		}
-	} else if !hasPass {
-		return fmt.Errorf("set %s to the admin password (an empty value explicitly enables passwordless auth)", r.o.passwordEnv)
+	} else if pass, e = r.passwordFromEnv(); e != nil {
+		return e
 	}
 	if i.Host == "" || i.Admin == "" {
 		return errors.New("host and admin must not be empty")
@@ -394,18 +397,83 @@ func (r *runner) instance(ctx context.Context, action, name string) error {
 		return e
 	}
 	c.Close(ctx)
-	if e = r.s.secrets.Set(adminKey(name), pass); e != nil {
-		return e
-	}
-	r.s.state.Instances[name] = i
 	if r.s.state.Default == "" {
 		r.s.state.Default = name
 	}
-	if e = r.s.save(); e != nil {
+	if e = r.s.putInstance(name, i, pass); e != nil {
 		return e
 	}
 	return r.done("Registered instance " + name)
 }
+
+func (r *runner) updateInstance(ctx context.Context, name string) error {
+	i, ok := r.s.state.Instances[name]
+	if !ok {
+		return errors.New("unknown instance")
+	}
+	if i.Container != "" && (r.o.changed["host"] || r.o.changed["port"] || r.o.changed["admin"]) {
+		return errors.New("container discovery manages host, port, and admin; only sslmode and password-env can be updated")
+	}
+	moved := (r.o.changed["host"] && r.o.host != i.Host) || (r.o.changed["port"] && r.o.port != i.Port)
+	if moved && !r.o.force {
+		var bound []string
+		for _, n := range keys(r.s.state.Apps) {
+			if r.s.state.Apps[n].Instance == name {
+				bound = append(bound, n)
+			}
+		}
+		if len(bound) > 0 {
+			return fmt.Errorf("apps %s use instance %s; a new host or port does not move their databases or users. Pass --force only if the new address reaches the same server", strings.Join(bound, ", "), name)
+		}
+	}
+	if r.o.changed["host"] {
+		i.Host = r.o.host
+	}
+	if r.o.changed["port"] {
+		i.Port = r.o.port
+	}
+	if r.o.changed["admin"] {
+		i.Admin = r.o.admin
+	}
+	if r.o.changed["sslmode"] {
+		i.SSLMode = r.o.sslmode
+	}
+	if i.Host == "" || i.Admin == "" {
+		return errors.New("host and admin must not be empty")
+	}
+	var pass string
+	var err error
+	if r.o.changed["password-env"] {
+		pass, err = r.passwordFromEnv()
+	} else {
+		pass, err = r.s.secrets.Get(adminKey(name))
+	}
+	if err != nil {
+		return err
+	}
+	i, used, c, err := connectInstance(ctx, i, pass)
+	if err != nil {
+		return err
+	}
+	c.Close(ctx)
+	// The container fallback must not silently replace a password the user supplied.
+	if r.o.changed["password-env"] && used != pass {
+		return fmt.Errorf("the password in %s was rejected", r.o.passwordEnv)
+	}
+	if err = r.s.putInstance(name, i, used); err != nil {
+		return err
+	}
+	return r.done("Updated instance " + name)
+}
+
+func (r *runner) passwordFromEnv() (string, error) {
+	pass, ok := os.LookupEnv(r.o.passwordEnv)
+	if !ok {
+		return "", fmt.Errorf("set %s to the admin password (an empty value explicitly enables passwordless auth)", r.o.passwordEnv)
+	}
+	return pass, nil
+}
+
 func (r *runner) credentials(ctx context.Context, cmd, target string) error {
 	name, key, a, e := r.app(target)
 	if e != nil {

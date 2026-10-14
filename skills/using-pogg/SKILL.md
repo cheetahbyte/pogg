@@ -26,6 +26,14 @@ Use `--json` for `instance list`, `list`, `info`, and `doctor` to get structured
 
 Finish by checking `pogg info APP` against the requested databases, users, and instance.
 
+## Update instance settings
+
+Connection URLs inherit the registered instance's SSL mode. For a confirmed local server that needs TLS disabled, use `pogg instance update INSTANCE --sslmode disable` instead of rewriting each URL. Replace `INSTANCE` with its registered name. Consult `pogg instance update --help` first to confirm the installed version supports it.
+
+Updates change only explicitly supplied settings and verify connectivity before saving. Unspecified settings and the saved admin password are preserved. Supply `--password-env ENV_NAME` only to replace the saved credential with an existing server password; this does not reset the PostgreSQL password. Docker-backed instances allow SSL mode and credential updates; discovery manages their host, port, and admin login.
+
+An update affects every app on that instance. A host or port change on an instance with apps requires `--force`; pass it only when the new address reaches the same server, never to move apps to another server. Use it within the user's authorized scope and verify the saved settings with `pogg instance list --json`.
+
 ## Pass credentials without displaying them
 
 Choose `APP/USER` explicitly when the app has multiple users, and `--db DATABASE` when the user has multiple databases. Replace `USER` and `DATABASE` with aliases from the app metadata.
