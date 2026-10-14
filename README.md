@@ -7,8 +7,10 @@ Provision PostgreSQL databases and owner logins for local development. Get conne
 Requires Go 1.25+, PostgreSQL 14+, and an admin login. Docker discovery also requires the Docker CLI and a published PostgreSQL port.
 
 ```sh
-go install ./cmd/pogg
+go install github.com/cheetahbyte/pogg/cmd/pogg@latest
 ```
+
+To install from a local checkout, run `go install ./cmd/pogg` in the repository.
 
 Add Go's binary directory to your `PATH`.
 
